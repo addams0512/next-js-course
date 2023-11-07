@@ -1,3 +1,6 @@
+import "@/app/ui/global.css";
+import { fontSans, fontMono } from "./ui/fonts";
+
 export default function RootLayout({
   children,
 }: {
@@ -5,7 +8,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className={`${fontSans.variable} ${fontMono.variable} antialiased`}>
+        {children}
+      </body>
     </html>
   );
 }
