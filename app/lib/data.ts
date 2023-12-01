@@ -1,14 +1,4 @@
-import { sql } from "@vercel/postgres";
 import { unstable_noStore as noStore } from "next/cache";
-import {
-  CustomerField,
-  CustomersTable,
-  InvoiceForm,
-  InvoicesTable,
-  LatestInvoiceRaw,
-  User,
-  Revenue,
-} from "./definitions";
 import { formatCurrency } from "./utils";
 
 export async function fetchRevenue() {
@@ -37,10 +27,13 @@ export async function fetchLatestInvoices() {
     await new Promise((invoice) => setTimeout(invoice, 5000));
     console.log("Data fetch complete after 5 seconds.");
 
-    const latestInvoices = await fetch("http://127.0.0.1:8000/api/invoice/");
+    const latestInvoices = await fetch(
+      "http://127.0.0.1:8000/api/invoice-list/",
+    );
     const data = await latestInvoices.json();
+    console.log(data);
 
-    return data;
+    return data.slice(0, 6);
   } catch (error) {
     console.error("Database Error:", error);
     throw new Error("Failed to fetch the latest invoices.");
@@ -55,7 +48,9 @@ export async function fetchCardData() {
     console.log("Card data fecth complete after 3 seconds.");
 
     const customers_data = await fetch("http://127.0.0.1:8000/api/customers/");
-    const invoices_data = await fetch("http://127.0.0.1:8000/api/invoices/");
+    const invoices_data = await fetch(
+      "http://127.0.0.1:8000/api/invoice-list/",
+    );
     const customers = await customers_data.json();
     const invoices = await invoices_data.json();
 
@@ -96,7 +91,9 @@ export async function fetchFilteredInvoices(
 ) {
   noStore();
   try {
-    const invoices_data = await fetch("http://127.0.0.1:8000/api/searchi/");
+    const invoices_data = await fetch(
+      "http://127.0.0.1:8000/api/invoice-list/",
+    );
     const invoices = await invoices_data.json();
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIndex = startIndex + ITEMS_PER_PAGE;
@@ -104,11 +101,11 @@ export async function fetchFilteredInvoices(
     const filteredInvoices = invoices
       .filter((invoice: any) => {
         if (
-          invoice.name.includes(query) ||
-          invoice.email.includes(query) ||
-          invoice.amount.includes(query) ||
-          invoice.date.includes(query) ||
-          invoice.status === query
+          invoice.customer.name.includes(query.toLowerCase()) ||
+          invoice.customer.email.includes(query.toLowerCase()) ||
+          invoice.amount.includes(query.toLowerCase()) ||
+          invoice.date.includes(query.toLowerCase()) ||
+          invoice.status.includes(query.toLowerCase())
         ) {
           return invoice;
         }
@@ -125,18 +122,27 @@ export async function fetchFilteredInvoices(
 export async function fetchInvoicesPages(query: string) {
   noStore();
   try {
-    const count = await sql`SELECT COUNT(*)
-    FROM invoices
-    JOIN customers ON invoices.customer_id = customers.id
-    WHERE
-      customers.name ILIKE ${`%${query}%`} OR
-      customers.email ILIKE ${`%${query}%`} OR
-      invoices.amount::text ILIKE ${`%${query}%`} OR
-      invoices.date::text ILIKE ${`%${query}%`} OR
-      invoices.status ILIKE ${`%${query}%`}
-  `;
+    const invoices_data = await fetch(
+      "http://127.0.0.1:8000/api/invoice-list/",
+    );
+    const invoices = await invoices_data.json();
 
-    const totalPages = Math.ceil(Number(count.rows[0].count) / ITEMS_PER_PAGE);
+    const filteredInvoices = invoices.filter((invoice: any) => {
+      if (
+        invoice.customer.name.includes(query) ||
+        invoice.customer.email.includes(query) ||
+        invoice.amount.includes(query) ||
+        invoice.date.includes(query) ||
+        invoice.status.includes(query)
+      ) {
+        return invoice;
+      }
+    });
+
+    const totalPages = Math.ceil(
+      Number(filteredInvoices.length) / ITEMS_PER_PAGE,
+    );
+
     return totalPages;
   } catch (error) {
     console.error("Database Error:", error);
@@ -144,26 +150,15 @@ export async function fetchInvoicesPages(query: string) {
   }
 }
 
-export async function fetchInvoiceById(id: string) {
+export async function fetchInvoiceById(id: number) {
   noStore();
   try {
-    const data = await sql<InvoiceForm>`
-      SELECT
-        invoices.id,
-        invoices.customer_id,
-        invoices.amount,
-        invoices.status
-      FROM invoices
-      WHERE invoices.id = ${id};
-    `;
+    const data_invoices = await fetch(
+      `http://127.0.0.1:8000/api/invoice-list/${id}`,
+    );
+    const data = await data_invoices.json();
 
-    const invoice = data.rows.map((invoice) => ({
-      ...invoice,
-      // Convert amount from cents to dollars
-      amount: invoice.amount / 100,
-    }));
-
-    return invoice[0];
+    return data;
   } catch (error) {
     console.error("Database Error:", error);
   }
@@ -172,16 +167,22 @@ export async function fetchInvoiceById(id: string) {
 export async function fetchCustomers() {
   noStore();
   try {
-    const data = await sql<CustomerField>`
-      SELECT
-        id,
-        name
-      FROM customers
-      ORDER BY name ASC
-    `;
+    const customers_data = await fetch("http://127.0.0.1:8000/api/customers/");
+    const customers = await customers_data.json();
+    const data = customers.sort(function (a: any, b: any) {
+      const nameA = a.name.toLowerCase(); // Convert names to lowercase for case-insensitive sorting
+      const nameB = b.name.toLowerCase();
 
-    const customers = data.rows;
-    return customers;
+      if (nameA < nameB) {
+        return -1;
+      }
+      if (nameA > nameB) {
+        return 1;
+      }
+      // names must be equal
+      return 0;
+    });
+    return data;
   } catch (err) {
     console.error("Database Error:", err);
     throw new Error("Failed to fetch all customers.");
@@ -219,16 +220,5 @@ export async function fetchFilteredCustomers(query: string) {
   } catch (err) {
     console.error("Database Error:", err);
     throw new Error("Failed to fetch customer table.");
-  }
-}
-
-export async function getUser(email: string) {
-  noStore();
-  try {
-    const user = await sql`SELECT * from USERS where email=${email}`;
-    return user.rows[0] as User;
-  } catch (error) {
-    console.error("Failed to fetch user:", error);
-    throw new Error("Failed to fetch user.");
   }
 }
